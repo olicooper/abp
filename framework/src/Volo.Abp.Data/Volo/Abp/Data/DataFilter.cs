@@ -1,9 +1,9 @@
-﻿using System;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Volo.Abp.DependencyInjection;
 
 namespace Volo.Abp.Data
@@ -11,40 +11,75 @@ namespace Volo.Abp.Data
     //TODO: Create a Volo.Abp.Data.Filtering namespace?
     public class DataFilter : IDataFilter, ISingletonDependency
     {
-        private readonly ConcurrentDictionary<Type, object> _filters;
+        public IReadOnlyDictionary<Type, object> ReadOnlyFilters { get => Filters;  }
+        protected readonly ConcurrentDictionary<Type, object> Filters;
 
-        private readonly IServiceProvider _serviceProvider;
+        protected readonly IServiceProvider ServiceProvider;
 
         public DataFilter(IServiceProvider serviceProvider)
         {
-            _serviceProvider = serviceProvider;
-            _filters = new ConcurrentDictionary<Type, object>();
+            ServiceProvider = serviceProvider;
+            Filters = new ConcurrentDictionary<Type, object>();
         }
 
-        public IDisposable Enable<TFilter>()
+        public virtual IDisposable Enable<TFilter>()
             where TFilter : class
         {
             return GetFilter<TFilter>().Enable();
         }
 
-        public IDisposable Disable<TFilter>()
+        public virtual IDisposable Disable<TFilter>()
             where TFilter : class
         {
             return GetFilter<TFilter>().Disable();
         }
 
-        public bool IsEnabled<TFilter>()
+        public virtual bool IsEnabled<TFilter>()
             where TFilter : class
         {
             return GetFilter<TFilter>().IsEnabled;
         }
 
-        private IDataFilter<TFilter> GetFilter<TFilter>()
+        public virtual bool IsEnabled(Type filterType)
+        {
+            if (filterType == null
+                // Should be a filter interface with a concrete parameter e.g. Blog (filterType == ISoftDelete<Blog>)
+                || (filterType.GenericTypeArguments.Length == 1 && filterType.GenericTypeArguments[0].IsGenericType)
+                // Otherwise it should be a conrete type e.g. ISoftDelete
+                || filterType.GenericTypeArguments.Length != 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                var genericType = typeof(IDataFilter<>).MakeGenericType(filterType);
+                var filter = Filters.GetOrAdd(
+                    genericType,
+                    () => ServiceProvider.GetRequiredService(genericType)
+                );
+
+                // todo: Can we avoid using magic strings here for "IsEnabled"?
+                return (bool)genericType.InvokeMember(
+                    "IsEnabled",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
+                    Type.DefaultBinder,
+                    filter,
+                    new object[] { }
+                );
+            } 
+            catch
+            {
+                return false;
+            }
+        }
+
+        protected virtual IDataFilter<TFilter> GetFilter<TFilter>()
             where TFilter : class
         {
-            return _filters.GetOrAdd(
+            return Filters.GetOrAdd(
                 typeof(TFilter),
-                () => _serviceProvider.GetRequiredService<IDataFilter<TFilter>>()
+                () => ServiceProvider.GetRequiredService<IDataFilter<TFilter>>()
             ) as IDataFilter<TFilter>;
         }
     }
@@ -52,57 +87,57 @@ namespace Volo.Abp.Data
     public class DataFilter<TFilter> : IDataFilter<TFilter>
         where TFilter : class
     {
-        public bool IsEnabled
+        public virtual bool IsEnabled
         {
             get
             {
                 EnsureInitialized();
-                return _filter.Value.IsEnabled;
+                return Filter.Value.IsEnabled;
             }
         }
 
-        private readonly AbpDataFilterOptions _options;
+        protected readonly AbpDataFilterOptions Options;
 
-        private readonly AsyncLocal<DataFilterState> _filter;
+        protected readonly AsyncLocal<DataFilterState> Filter;
 
         public DataFilter(IOptions<AbpDataFilterOptions> options)
         {
-            _options = options.Value;
-            _filter = new AsyncLocal<DataFilterState>();
+            Options = options.Value;
+            Filter = new AsyncLocal<DataFilterState>();
         }
 
-        public IDisposable Enable()
+        public virtual IDisposable Enable()
         {
             if (IsEnabled)
             {
                 return NullDisposable.Instance;
             }
 
-            _filter.Value.IsEnabled = true;
+            Filter.Value.IsEnabled = true;
 
             return new DisposeAction(() => Disable());
         }
 
-        public IDisposable Disable()
+        public virtual IDisposable Disable()
         {
             if (!IsEnabled)
             {
                 return NullDisposable.Instance;
             }
 
-            _filter.Value.IsEnabled = false;
+            Filter.Value.IsEnabled = false;
 
             return new DisposeAction(() => Enable());
         }
 
-        private void EnsureInitialized()
+        protected virtual void EnsureInitialized()
         {
-            if (_filter.Value != null)
+            if (Filter.Value != null)
             {
                 return;
             }
 
-            _filter.Value = _options.DefaultStates.GetOrDefault(typeof(TFilter))?.Clone() ?? new DataFilterState(true);
+            Filter.Value = Options.DefaultStates.GetOrDefault(typeof(TFilter))?.Clone() ?? new DataFilterState(true);
         }
     }
 }
