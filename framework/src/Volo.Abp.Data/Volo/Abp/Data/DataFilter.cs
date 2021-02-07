@@ -62,14 +62,10 @@ namespace Volo.Abp.Data
                 throw new AbpException($"The {nameof(filterType)} '{(filterType == null ? "<null>" : filterType.Name)}' is not a valid type for {nameof(IsEnabled)}");
             }
 
-            var foundFilter = GetFilter(filterType, cacheResult);
 
-            if (foundFilter != null)
+            if (GetFilter(filterType, cacheResult) is IToggleDataFilter foundFilter)
             {
-                // todo: Can we avoid using magic strings here for "IsEnabled"?
-                return (bool)foundFilter.GetType()
-                    .GetProperty("IsEnabled", BindingFlags.Public | BindingFlags.Instance)
-                    .GetValue(foundFilter);
+                return foundFilter.IsEnabled;
             }
 
             return DefaultFilterStates.GetOrDefault(filterType)?.IsEnabled ?? FilterOptions.DefaultFilterState;

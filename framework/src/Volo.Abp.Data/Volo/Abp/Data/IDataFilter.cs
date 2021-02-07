@@ -3,8 +3,10 @@ using System.Collections.Generic;
 
 namespace Volo.Abp.Data
 {
-    public interface IDataFilter<TFilter>
-        where TFilter : class
+    public interface IDataFilter<TFilter> : IToggleDataFilter
+        where TFilter : class { }
+
+    public interface IToggleDataFilter
     {
         IDisposable Enable();
 

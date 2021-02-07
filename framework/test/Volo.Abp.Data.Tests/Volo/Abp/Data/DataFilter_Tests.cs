@@ -128,12 +128,13 @@ namespace Volo.Abp.Data
             _dataFilter.ReadOnlyFilters.ContainsKey(typeof(ISoftDelete)).ShouldBe(false);
         }
 
-        class TestSoftDeleteClass : ISoftDelete<TestSoftDeleteClass>
+        class TestSoftDeleteClass : ISoftDelete<TestSoftDeleteClass>, ITestMarkerInterface
         {
             public bool IsDeleted { get; set; }
         }
 
         interface IGenericTestInterface { }
+        interface ITestMarkerInterface { }
 
         [DependsOn(typeof(AbpDataModule))]
         public class TestModule : AbpModule
