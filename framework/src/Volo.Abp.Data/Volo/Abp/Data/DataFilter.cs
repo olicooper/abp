@@ -12,68 +12,50 @@ namespace Volo.Abp.Data
     {
         public IReadOnlyDictionary<Type, IBasicDataFilter> ReadOnlyFilters => Filters;
 
-        public IReadOnlyDictionary<Type, DataFilterState> DefaultFilterStates  => FilterOptions.DefaultStates;
-
         protected readonly ConcurrentDictionary<Type, IBasicDataFilter> Filters = new();
-
-        protected readonly AbpDataFilterOptions FilterOptions;
 
         protected readonly IServiceProvider ServiceProvider;
 
         public DataFilter(IServiceProvider serviceProvider)
         {
             ServiceProvider = serviceProvider;
-
-            FilterOptions = ServiceProvider
-                .GetRequiredService<IOptions<AbpDataFilterOptions>>()
-                .Value;
         }
 
         public virtual IDisposable Enable<TFilter>()
             where TFilter : class
         {
-            return GetFilter<TFilter>().Enable();
+            return GetOrAddFilter<TFilter>().Enable();
         }
 
         public virtual IDisposable Disable<TFilter>()
             where TFilter : class
         {
-            return GetFilter<TFilter>().Disable();
+            return GetOrAddFilter<TFilter>().Disable();
         }
 
         public virtual bool IsActive<TFilter>()
             where TFilter : class
         {
-            return GetFilter<TFilter>()?.IsActive ?? false;
+            return GetOrAddFilter<TFilter>().IsActive;
         }
 
         public virtual bool IsActive(Type filterType)
         {
-            return GetFilter(filterType)?.IsActive ?? false;
+            return GetOrAddFilter(filterType).IsActive;
         }
 
         public virtual bool IsEnabled<TFilter>()
             where TFilter : class
         {
-            return GetFilter<TFilter>().IsEnabled;
+            return GetOrAddFilter<TFilter>().IsEnabled;
         }
 
         public virtual bool IsEnabled(Type filterType)
         {
-            var foundFilter = GetFilter(filterType);
-            if (foundFilter != null)
-            {
-                return foundFilter.IsEnabled;
-            }
-
-            return DefaultFilterStates.GetOrDefault(filterType)?.IsEnabled ?? FilterOptions.DefaultFilterState;
+            return GetOrAddFilter(filterType).IsEnabled;
         }
 
-        /// <summary>
-        /// Gets the <see cref="IDataFilter{TFilter}"/> representing the <typeparamref name="TFilter"/>. 
-        /// </summary>
-        /// <typeparam name="TFilter">The type of filter e.g. <see cref="ISoftDelete"/>. </typeparam>
-        public virtual IDataFilter<TFilter> GetFilter<TFilter>()
+        public virtual IDataFilter<TFilter> GetOrAddFilter<TFilter>()
             where TFilter : class
         {
             return Filters.GetOrAdd(
@@ -82,7 +64,7 @@ namespace Volo.Abp.Data
             ) as IDataFilter<TFilter>;
         }
 
-        public virtual IBasicDataFilter GetFilter(Type filterType)
+        public virtual IBasicDataFilter GetOrAddFilter(Type filterType)
         {
             if (filterType == null
                 // Should have no more than 1 interface type argument
