@@ -24,13 +24,41 @@ namespace Volo.Abp.Data
         public void Should_Allow_Default_Filter_State_To_Be_Updated()
         {
             _dataFilter.ReadOnlyFilters.ContainsKey(typeof(ISoftDelete)).ShouldBe(false);
-            _dataFilter.ReadOnlyFilters.ContainsKey(typeof(IGenericTestInterface)).ShouldBe(false);
+            _dataFilter.ReadOnlyFilters.ContainsKey(typeof(IGenericDataFilter1)).ShouldBe(false);
 
             _dataFilterOptions.DefaultFilterState = false;
             _dataFilter.IsEnabled<ISoftDelete>().ShouldBe(false);
 
             _dataFilterOptions.DefaultFilterState = true;
-            _dataFilter.IsEnabled<IGenericTestInterface>().ShouldBe(true);
+            _dataFilter.IsEnabled<IGenericDataFilter1>().ShouldBe(true);
+
+            _dataFilter.IsEnabled<IDefaultDisabledFilter>().ShouldBe(false);
+        }
+
+        [Fact]
+        public void Should_Correctly_Dispose_Filter_State()
+        {
+            void task()
+            {
+                _dataFilter.IsActive<IGenericDataFilter1>().ShouldBe(false);
+                _dataFilter.IsEnabled<IGenericDataFilter1>().ShouldBe(true);
+
+                // filter now cached, is it still marked IsActive == false?
+                _dataFilter.IsActive<IGenericDataFilter1>().ShouldBe(false);
+
+                using (_dataFilter.Disable<IGenericDataFilter1>())
+                {
+                    _dataFilter.IsEnabled<IGenericDataFilter1>().ShouldBe(false);
+                    _dataFilter.IsActive<IGenericDataFilter1>().ShouldBe(true);
+                }
+
+                _dataFilter.IsActive<IGenericDataFilter1>().ShouldBe(false);
+                _dataFilter.IsEnabled<IGenericDataFilter1>().ShouldBe(true);
+            }
+
+            // Simulate multiple 'requests' happening at once.
+            // The filter state should not be contaminated between requests.
+            Parallel.Invoke(task, task, task, task);
         }
 
         [Fact]
@@ -38,11 +66,11 @@ namespace Volo.Abp.Data
         {
             _dataFilterOptions.DefaultFilterState.ShouldBe(true);
 
-            _dataFilterOptions.DefaultStates.ContainsKey(typeof(IGenericTestInterface)).ShouldBe(false);
+            _dataFilterOptions.DefaultStates.ContainsKey(typeof(IGenericDataFilter1)).ShouldBe(false);
 
-            _dataFilterOptions.DefaultStates.Add(typeof(IGenericTestInterface), new DataFilterState(false));
+            _dataFilterOptions.DefaultStates.Add(typeof(IGenericDataFilter1), new DataFilterState(false));
 
-            _dataFilter.IsEnabled<IGenericTestInterface>().ShouldBe(false);
+            _dataFilter.IsEnabled<IGenericDataFilter1>().ShouldBe(false);
             _dataFilter.IsEnabled<ISoftDelete>().ShouldBe(true);
         }
 
@@ -83,11 +111,13 @@ namespace Volo.Abp.Data
         [Fact]
         public void Should_Handle_Dynamic_Filters()
         {
+            _dataFilter.IsActive(typeof(ISoftDelete)).ShouldBe(false);
             _dataFilter.IsEnabled(typeof(ISoftDelete)).ShouldBe(true);
 
             using (_dataFilter.Disable<ISoftDelete<TestSoftDeleteClass>>())
             {
-                _dataFilter.IsEnabled<ISoftDelete<TestSoftDeleteClass>>().ShouldBe(false);
+                _dataFilter.IsActive(typeof(ISoftDelete<TestSoftDeleteClass>)).ShouldBe(true);
+                _dataFilter.IsEnabled(typeof(ISoftDelete<TestSoftDeleteClass>)).ShouldBe(false);
             }
 
             _dataFilter.IsEnabled<ISoftDelete<TestSoftDeleteClass>>().ShouldBe(true);
@@ -109,36 +139,54 @@ namespace Volo.Abp.Data
         }
 
         [Fact]
-        public void Should_Cache_Filter()
+        public void Should_Work_Without_DataFilter_Container()
         {
-            _dataFilter.ReadOnlyFilters.ContainsKey(typeof(ISoftDelete)).ShouldBe(false);
+            var genericDataFilter2 = ServiceProvider.GetRequiredService<IDataFilter<IGenericDataFilter2>>();
 
-            _dataFilter.IsEnabled<ISoftDelete>().ShouldBe(true);
+            genericDataFilter2.IsActive.ShouldBe(false);
+            genericDataFilter2.IsEnabled.ShouldBe(true);
 
-            _dataFilter.ReadOnlyFilters.ContainsKey(typeof(ISoftDelete)).ShouldBe(true);
-        }
+            using (genericDataFilter2.Disable())
+            {
+                genericDataFilter2.IsActive.ShouldBe(true);
+                genericDataFilter2.IsEnabled.ShouldBe(false);
 
-        [Fact]
-        public void Should_Not_Cache_Filter()
-        {
-            _dataFilter.ReadOnlyFilters.ContainsKey(typeof(ISoftDelete)).ShouldBe(false);
+                using (genericDataFilter2.Enable())
+                {
+                    genericDataFilter2.IsActive.ShouldBe(true);
+                    genericDataFilter2.IsEnabled.ShouldBe(true);
+                }
 
-            _dataFilter.IsEnabled<ISoftDelete>(false).ShouldBe(true);
+                genericDataFilter2.IsActive.ShouldBe(true);
+            }
 
-            _dataFilter.ReadOnlyFilters.ContainsKey(typeof(ISoftDelete)).ShouldBe(false);
+            genericDataFilter2.IsActive.ShouldBe(false);
+            genericDataFilter2.IsEnabled.ShouldBe(true);
         }
 
         class TestSoftDeleteClass : ISoftDelete<TestSoftDeleteClass>, ITestMarkerInterface
         {
             public bool IsDeleted { get; set; }
         }
-
-        interface IGenericTestInterface { }
         interface ITestMarkerInterface { }
+
+        interface IDefaultDisabledFilter { }
+        interface IGenericDataFilter1 { }
+        interface IGenericDataFilter2 { }
+
 
         [DependsOn(typeof(AbpDataModule))]
         public class TestModule : AbpModule
         {
+            public override void ConfigureServices(ServiceConfigurationContext context)
+            {
+                base.ConfigureServices(context);
+
+                Configure<AbpDataFilterOptions>(options =>
+                {
+                    options.DefaultStates.Add(typeof(IDefaultDisabledFilter), new DataFilterState(false));
+                });
+            }
 
         }
     }
